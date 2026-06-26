@@ -117,6 +117,18 @@ make_grid <- function() {
   g
 }
 
+## Read the grid-level species-occupancy table. The uncompressed CSV is large,
+## so the repository ships a .zip; this helper reads the plain CSV if present,
+## otherwise reads the CSV directly from inside the .zip (no manual unzip
+## needed). Block 1 writes the plain CSV when the pipeline is run from raw data.
+read_cell_species <- function() {
+  csv <- paste0(DIR_OUT, "cell_species_long.csv")
+  zip <- paste0(DIR_OUT, "cell_species_long.csv.zip")
+  if (file.exists(csv)) return(read.csv(csv))
+  if (file.exists(zip)) return(read.csv(unz(zip, "cell_species_long.csv")))
+  stop("cell_species_long.csv (or .zip) not found in ", DIR_OUT)
+}
+
 ## Read the multi-year MODIS NPP tiles, mask fill/negative values, and return
 ## the temporal mean as a per-cell table aligned to the analysis grid.
 npp_per_cell <- function(grid) {
@@ -559,7 +571,7 @@ run_block3_density_maps <- function() {
   grid <- make_grid()
   npp_by_cell <- npp_per_cell(grid)
 
-  cs <- read.csv(paste0(DIR_OUT, "cell_species_long.csv"))
+  cs <- read_cell_species()
   gp <- read.csv(PATH_GREENSPOON)
   pop <- gp %>% transmute(binomial,
                           pop    = estimated_population,
@@ -704,7 +716,7 @@ run_block4_flux_pipeline <- function() {
   gp <- read.csv(PATH_GREENSPOON)
   pop <- setNames(gp$estimated_population, gp$binomial)
 
-  cs <- read.csv(paste0(DIR_OUT, "cell_species_long.csv")) %>%
+  cs <- read_cell_species() %>%
     filter(binomial %in% names(pop), binomial %in% props$binomial) %>%
     left_join(npp_by_cell, by = "cell_id") %>%
     mutate(npp_filled = ifelse(is.na(npp), 0, npp), has_npp = !is.na(npp)) %>%
@@ -776,7 +788,7 @@ run_block5_uncertainty <- function() {
   pop    <- setNames(gp$estimated_population, gp$binomial)
   pop_sd <- setNames(gp$log_sd, gp$binomial)
 
-  cs <- read.csv(paste0(DIR_OUT, "cell_species_long.csv")) %>%
+  cs <- read_cell_species() %>%
     filter(binomial %in% names(pop), binomial %in% props$binomial) %>%
     left_join(npp_by_cell, by = "cell_id") %>%
     mutate(npp_filled = ifelse(is.na(npp), 0, npp), has_npp = !is.na(npp)) %>%
@@ -860,7 +872,7 @@ run_block6_figures <- function() {
   props <- read.csv("species_flux_props_NP.csv")
   gp <- read.csv(PATH_GREENSPOON); pop <- setNames(gp$estimated_population, gp$binomial)
   npp_by_cell <- npp_per_cell(grid)
-  cs <- read.csv(paste0(DIR_OUT, "cell_species_long.csv")) %>%
+  cs <- read_cell_species() %>%
     filter(binomial %in% names(pop), binomial %in% props$binomial) %>%
     left_join(npp_by_cell, by = "cell_id") %>%
     mutate(npp_filled = ifelse(is.na(npp), 0, npp), has_npp = !is.na(npp)) %>%
@@ -1024,7 +1036,7 @@ run_block7_report_values <- function() {
   ## Rebuild cell-by-species under a chosen within-range allocation rule.
   build_weighted <- function(weight_col = c("npp", "uniform")) {
     weight_col <- match.arg(weight_col)
-    read.csv(paste0(DIR_OUT, "cell_species_long.csv")) %>%
+    read_cell_species() %>%
       filter(binomial %in% names(pop), binomial %in% props$binomial) %>%
       left_join(npp_by_cell, by = "cell_id") %>%
       mutate(npp_filled = ifelse(is.na(npp), 0, npp), has_npp = !is.na(npp)) %>%

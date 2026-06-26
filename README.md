@@ -70,9 +70,9 @@ To support full reproducibility without the raw polygons, the repository provide
 
 1. **Access instructions and version.** Download the terrestrial mammal ranges from the IUCN Red List spatial data download (https://www.iucnredlist.org/resources/spatial-data-download). Record the version and download date you use. This study used IUCN Red List version `<FILL IN>` (downloaded `<FILL IN>`).
 2. **The processing script.** Block 1 (`run_block1_rasterize_ranges`) documents exactly how the polygons are converted to the 0.5-degree grid (extant ranges, native/reintroduced origin, `touches = TRUE`).
-3. **The derived intermediate.** `out/cell_species_long.csv` is the grid-level species-occupancy table produced by Block 1. All downstream blocks (4-7) read this file, so every reported figure and value can be reproduced from it without the raw IUCN polygons.
+3. **The derived intermediate.** The grid-level species-occupancy table produced by Block 1 is provided as `out/cell_species_long.csv.zip` (the uncompressed CSV exceeds GitHub's file-size limit). The pipeline reads it directly from the `.zip` — no manual extraction is needed. All downstream blocks (4-7) read this table, so every reported figure and value can be reproduced from it without the raw IUCN polygons.
 
-If you wish to regenerate `cell_species_long.csv` from scratch, obtain the IUCN polygons as above, set `PATH_IUCN_POLYGON` in the CONFIG section, and run Block 1.
+If you wish to regenerate the occupancy table from scratch, obtain the IUCN polygons as above, set `PATH_IUCN_POLYGON` in the CONFIG section, and run Block 1 (which writes the uncompressed `out/cell_species_long.csv`).
 
 ---
 
