@@ -85,6 +85,7 @@ If you wish to regenerate the occupancy table from scratch, obtain the IUCN poly
 | 2b | Life tables from malddaba | `calibration_table.csv` |
 | 2c | Extrapolate mortality parameters to all species | `predictions_all.csv` |
 | 2d | Turnover (annual population turnover) | `turnover_final.csv` |
+| 2e | Calibration diagnostics (Supplementary Fig. S1) | `figure/fig_calibration.png` |
 | 3 | Density maps (NPP-weighted within-range allocation) | `cell_density_both.csv` |
 | 4 | P-supply flux (skeletal P x retention) — core | `species_flux_props_NP.csv` |
 | 5 | Uncertainty propagation (Monte Carlo) | `cell_flux_ci_P.csv` |

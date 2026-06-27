@@ -123,7 +123,7 @@ make_grid <- function() {
 ## needed). Block 1 writes the plain CSV when the pipeline is run from raw data.
 read_cell_species <- function() {
   csv <- paste0(DIR_OUT, "cell_species_long.csv")
-  zip <- paste0(DIR_OUT, "cell_species_long.csv.zip")
+  zip <- paste0(DIR_OUT, "cell_species_long.zip")
   if (file.exists(csv)) return(read.csv(csv))
   if (file.exists(zip)) return(read.csv(unz(zip, "cell_species_long.csv")))
   stop("cell_species_long.csv (or .zip) not found in ", DIR_OUT)
@@ -430,7 +430,10 @@ run_block2b_life_tables <- function() {
 #   mean_age_death : log10(mean_age) ~ log10(body mass) + order
 #   q0             : logit(q0)       ~ log10(body mass) + order
 # Including order materially improves the fit. Species whose order is absent
-# from the training set fall back to a body-mass-only model.
+# from the training set fall back to a body-mass-only model. Records with
+# q0 = 0 (juvenile mortality not captured by the source life table) are treated
+# as missing and excluded from the q0 fit; those species receive a q0 predicted
+# from the fitted relationship like any other unobserved species.
 #
 # Input : calibration_table.csv, body_mass_master.csv, trait_data_reported.csv
 # Output: predictions_all.csv (binom, order, bm, logbm, pred_meanage, pred_q0)
@@ -450,8 +453,12 @@ run_block2c_extrapolate <- function() {
   shape_orders  <- unique(d_shape$order)
 
   ## q0 model on the logit scale (mass + order), with a mass-only fallback.
-  d_q0 <- cal %>% filter(is.finite(q0), is.finite(logbm), !is.na(order)) %>%
-    mutate(q0c = pmin(pmax(q0, 1e-3), 1 - 1e-3), y = log(q0c / (1 - q0c)))
+  ## q0 = 0 (juvenile mortality recorded as zero) is biologically implausible for
+  ## wild mammals and reflects life tables in which first-year mortality was not
+  ## captured; we treat such records as missing and exclude them from the fit,
+  ## rather than clipping them to a floor that would distort the regression.
+  d_q0 <- cal %>% filter(is.finite(q0), q0 > 0, is.finite(logbm), !is.na(order)) %>%
+    mutate(q0c = pmin(q0, 1 - 1e-3), y = log(q0c / (1 - q0c)))
   q0_model   <- lm(y ~ logbm + order, data = d_q0)
   q0_bm_only <- lm(y ~ logbm,         data = d_q0)
   q0_orders  <- unique(d_q0$order)
@@ -547,6 +554,89 @@ run_block2d_turnover <- function() {
   out <- pred %>% select(binom, order, bm_kg, turnover_death, turnover_max, turnover_final)
   write.csv(out, "turnover_final.csv", row.names = FALSE)
   message(sprintf("Block 2d done: turnover_final.csv (%d species)", nrow(out)))
+}
+
+
+# ----- Block 2e: Calibration diagnostics (Supplementary figure)
+################################################################################
+# Visualise the demographic extrapolation relationships that underlie the
+# mortality and turnover predictions, as a Supplementary diagnostic figure. For
+# each fitted relationship we plot the calibration data against body mass on a
+# log axis, colour points by taxonomic order, and overlay the body-mass-only
+# fit; the body-mass + order model R^2 is reported in each panel title.
+#
+#   (a) life expectancy at birth, e0      log(e0) ~ log10(mass) + order
+#   (b) mean age at death                 log10(mean_age) ~ log10(mass) + order
+#   (c) juvenile mortality, q0 (logit)    logit(q0) ~ log10(mass) + order
+#   (d) reproductive allometry            log(annual daughters) ~ log(mass)
+#
+# Input : calibration_table.csv (Block 2b)
+# Output: figure/fig_calibration.png, figure/fig_calibration.csv
+################################################################################
+
+run_block2e_calibration_figure <- function() {
+  suppressPackageStartupMessages({ library(dplyr) })
+
+  ## calibration_table.csv is written by Block 2b to the working directory; the
+  ## provided intermediates may instead live under DIR_OUT. Accept either.
+  cal_path <- if (file.exists("calibration_table.csv")) "calibration_table.csv" else
+              paste0(DIR_OUT, "calibration_table.csv")
+  cal <- read.csv(cal_path)
+
+  ## Fit the same models used by Blocks 2c-2d, plus a mass-only reference line.
+  r2_full <- function(d, yexpr) {
+    d$y <- eval(yexpr, d)
+    d <- d[is.finite(d$y) & is.finite(d$logbm) & !is.na(d$order), ]
+    full <- lm(y ~ logbm + order, data = d)
+    bm   <- lm(y ~ logbm,         data = d)
+    list(d = d, full = full, bm = bm, r2_full = summary(full)$r.squared,
+         r2_bm = summary(bm)$r.squared)
+  }
+
+  fe0  <- r2_full(cal, quote(log(pmax(e0, 0.1))))
+  fmad <- r2_full(cal, quote(log10(mean_age_death)))
+  ## q0 = 0 records are excluded (treated as missing), matching Block 2c, so the
+  ## panel shows the data the regression actually uses (no logit-floor artefact).
+  fq0  <- r2_full(cal %>% filter(is.finite(q0), q0 > 0) %>%
+                    mutate(q0c = pmin(q0, 1 - 1e-3)),
+                  quote(log(q0c / (1 - q0c))))
+  d_mx <- cal %>% filter(is.finite(mbar), mbar > 0, is.finite(logbm)) %>%
+    mutate(log_bm_e = log(bm / 1000), log_daughters = log(mbar))
+  repro <- lm(log_daughters ~ log_bm_e, data = d_mx)
+
+  ## A distinct colour per order (recycled if there are many orders).
+  ord_levels <- sort(unique(na.omit(cal$order)))
+  pal <- grDevices::hcl.colors(max(length(ord_levels), 3), "Dark 3")
+  col_of <- function(o) pal[match(o, ord_levels)]
+
+  panel <- function(d, model_bm, xlab, ylab, ttl, r2f, r2b) {
+    plot(d$logbm, d$y, pch = 16, cex = 0.6, col = col_of(d$order),
+         xlab = xlab, ylab = ylab,
+         main = sprintf("%s\nR2 = %.2f (mass+order), %.2f (mass only)", ttl, r2f, r2b))
+    xs <- seq(min(d$logbm), max(d$logbm), length.out = 100)
+    lines(xs, predict(model_bm, newdata = data.frame(logbm = xs)), lwd = 2)
+  }
+
+  png(paste0(DIR_FIG, "fig_calibration.png"), width = 1700, height = 1300, res = 130)
+  par(mfrow = c(2, 2), mar = c(4.2, 4.2, 3.6, 1))
+  panel(fe0$d,  fe0$bm,  "log10 body mass (g)", "log e0",
+        "(a) Life expectancy at birth", fe0$r2_full, fe0$r2_bm)
+  panel(fmad$d, fmad$bm, "log10 body mass (g)", "log10 mean age at death",
+        "(b) Mean age at death", fmad$r2_full, fmad$r2_bm)
+  panel(fq0$d,  fq0$bm,  "log10 body mass (g)", "logit q0",
+        "(c) Juvenile mortality", fq0$r2_full, fq0$r2_bm)
+  ## Panel (d): reproductive allometry (mass-only model).
+  plot(d_mx$log_bm_e, d_mx$log_daughters, pch = 16, cex = 0.6, col = col_of(d_mx$order),
+       xlab = "log body mass (kg)", ylab = "log annual daughters",
+       main = sprintf("(d) Reproductive allometry\nR2 = %.2f", summary(repro)$r.squared))
+  xs <- seq(min(d_mx$log_bm_e), max(d_mx$log_bm_e), length.out = 100)
+  lines(xs, predict(repro, newdata = data.frame(log_bm_e = xs)), lwd = 2)
+  dev.off()
+
+  ## Export the plotted calibration points for transparency.
+  out <- cal %>% select(binom, order, bm, logbm, e0, mean_age_death, q0, mbar)
+  write.csv(out, paste0(DIR_FIG, "fig_calibration.csv"), row.names = FALSE)
+  message("Block 2e done: figure/fig_calibration.png, figure/fig_calibration.csv")
 }
 
 
@@ -1230,6 +1320,7 @@ run_all <- function(from_intermediates = TRUE) {
     run_block2d_turnover()
     run_block3_density_maps()
   }
+  run_block2e_calibration_figure()  # Supplementary diagnostic; needs calibration_table.csv
   run_block4_flux_pipeline()
   run_block5_uncertainty()
   run_block6_figures()
