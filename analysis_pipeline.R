@@ -3,7 +3,6 @@
 #
 # Manuscript: "Conserved in quantity, lost in structure: megafauna loss reshapes
 #              the spatial heterogeneity of carcass-derived phosphorus supply"
-# Author: Yoshihiro Nakashima (Nihon University)
 #
 # OVERVIEW
 #   This single file reproduces the full analysis, from raw spatial/demographic
